@@ -1,0 +1,7 @@
+{
+  "files.encoding": "gbk",
+  "files.autoGuessEncoding": false,
+  "[python]": {
+    "files.encoding": "gbk"
+  }
+}

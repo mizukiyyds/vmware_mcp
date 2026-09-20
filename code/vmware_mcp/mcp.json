@@ -1,0 +1,14 @@
+{
+    "vmware": {
+        "command": "C:\\Users\\<username>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+        "args": [
+            "-m",
+            "vmware_mcp.server"
+        ],
+        "env": {
+            "VMWARE_HOME": "C:\\Program Files\\VMware\\VMware Workstation",
+            "VMWARE_GUEST_USER": "<guest-user>",
+            "VMWARE_GUEST_PASSWORD": "<guest-password>"
+        }
+    }
+}

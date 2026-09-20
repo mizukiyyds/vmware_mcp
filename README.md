@@ -79,4 +79,4 @@ code/guest-config/ 客户机侧辅助脚本
 document/          Workstation 26H1 命令对照说明
 ```
 
-本地工作区目录（`blocker/`、`conclusion/`、`data/`、`picture/` 等）按 AGENTS.md 分类保留在本机，不上传本仓库。
+本地工作区目录（`blocker/`、`conclusion/`、`data/`、`picture/` 等）保留在本机，不上传本仓库。

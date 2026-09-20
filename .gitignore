@@ -10,7 +10,8 @@ venv/
 # 编辑器
 .cursor/
 
-# 本地工作区（按 AGENTS.md 分类保留在本机，不上传 GitHub）
+# 本地工作区（保留在本机，不上传 GitHub）
+AGENTS.md
 blocker/
 conclusion/
 data/

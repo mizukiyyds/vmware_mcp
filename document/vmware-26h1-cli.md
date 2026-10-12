@@ -2,6 +2,9 @@
 
 本机产品：VMware Workstation 26.0.0 build-25388281，安装目录 `C:\Program Files\VMware\VMware Workstation`。
 MCP 已去掉 OVF/OVA 导入导出工具（backup/ovftool.py），以及脱机磁盘整理/转换/修复工具（backup/vdisk.py）。
+0.4.0 起参照 HexRays ida-mcp 的 Code Mode 设计重构：48 个一对一工具精简为 6 个
+（list_vms / select_vm / execute / reference / set_guest_credentials / get_product_info），
+所有命令一律经 `execute` 调用，用法用 `reference` 检索。
 
 ## 命令行工具
 
@@ -13,24 +16,21 @@ MCP 已去掉 OVF/OVA 导入导出工具（backup/ovftool.py），以及脱机�
 
 vmrun 调用时固定加上 `-T ws`。加密虚拟机通过环境变量 `VMWARE_VM_PASSWORD` 传 `-vp`。
 
-## vmrun：相对旧封装补上的命令
+## vmrun：命令覆盖情况
 
-原先已覆盖电源、快照、绝大多数客户机文件/进程命令、共享文件夹、端口转发、clone/deleteVM。26H1 帮助里仍存在、现已补上的有：
+电源、快照、全部客户机文件/进程命令、共享文件夹、端口转发、clone/deleteVM 均可直接经 `execute` 调用，包括 26H1 帮助里较晚补上的：
 
 - `typeKeystrokesInGuest`
 - `connectNamedDevice` / `disconnectNamedDevice`
 - `downloadPhotonVM`
 - `runProgramInGuest` / `runScriptInGuest` 的 `-activeWindow`（以及脚本侧的 `-interactive` / `-noWait`）
-
-未单独做成工具、可用 `vmrun_command` 调用的：
-
-- `CreateTempfileInGuest`（无前缀参数；更完整的临时文件请用已有 `create_temp_file_in_guest`）
+- `CreateTempfileInGuest`（更完整的临时文件也可用 vmcli Guest createTempFile/createTempDir）
 
 ## vmcli 模块
 
 26H1 提供：Chipset、ConfigParams、Disk、Ethernet、Guest、HGFS、MKS、Nvme、Power、Sata、Serial、Snapshot、Tools、VM、VMTemplate、VProbes。
 
-已按常用操作封装。下列低频选项没有一对一工具，用 `vmcli_command`：
+全部模块命令都可经 `execute` 调用（形如 `execute("vmcli", "{vm} Disk query")`）。低频选项不再一一说明，用 `reference("模块名")` 查实时帮助，例如：
 
 - Disk：SetBandwidthCap、SetShares、ConvertAllocType、Branch 等
 - Ethernet：SetAddressType、SetSecurityPolicy、SetWakeOnPcktRcv 等
@@ -46,8 +46,8 @@ vmrun 调用时固定加上 `-T ws`。加密虚拟机通过环境变量 `VMWARE_
 
 ## 建机与挂盘顺序
 
-1. `create_vm` 只生成 vmx，不含磁盘
-2. `create_disk` 只生成 vmdk 文件
-3. `set_disk_present` 启用槽位（如 `scsi0:0` 或 `nvme0:0`）
-4. `set_disk_backing` 把槽位绑到 vmdk
-5. 需要 NVMe/SATA 控制器时先 `list_nvme` / `list_sata`，必要时 `set_nvme_present` / `set_sata_present`
+1. `vmcli VM Create` 只生成 vmx，不含磁盘
+2. `vmcli Disk Create` 只生成 vmdk 文件
+3. `vmcli Disk SetPresent` 启用槽位（如 `scsi0:0` 或 `nvme0:0`）
+4. `vmcli Disk SetBackingInfo` 把槽位绑到 vmdk
+5. 需要 NVMe/SATA 控制器时先 `vmcli Nvme query` / `vmcli Sata query`，必要时 `SetPresent`

@@ -1,489 +1,108 @@
-# coding: gbk
+"""vmware_mcpï¼šé€šè¿‡ vmrun/vmcli ç®¡ç†æœ¬æœº VMware Workstation è™šæ‹Ÿæœºã€‚
 
-from typing import Annotated
+å‚ç…§ HexRays ida-mcp çš„ Code Mode è®¾è®¡ï¼šåªæä¾› 6 ä¸ªå·¥å…·ã€‚
+agent ç”¨ reference æŒ‰éœ€æŸ¥å‘½ä»¤ç”¨æ³•ï¼Œç”¨ execute ç»„åˆä»»æ„ vmrun/vmcli å‘½ä»¤ï¼Œ
+è€Œä¸æ˜¯æ¯ä¸ªæ“ä½œä¸€ä¸ªå·¥å…·ï¼ˆæ—§ç‰ˆ 48 ä¸ªå·¥å…·çš„ schema ä¼šå¤§é‡å ç”¨ä¸Šä¸‹æ–‡çª—å£ï¼‰ã€‚
+"""
+
+import shlex
+from pathlib import Path
+from typing import Annotated, Literal
 
 from mcp.server import MCPServer
 from pydantic import Field
 
 from .inventory import list_registered_vms as read_inventory
 from .paths import product_info
+from .reference import search_reference
 from .vmcli import Vmcli
 from .vmrun import Vmrun
 
-mcp = MCPServer(
-    "vmware_mcp",
-    description="Í¨¹ı vmrun Óë vmcli ¹ÜÀí±¾»ú VMware Workstation ĞéÄâ»ú¡£¿Í»§»úµÇÂ¼ĞÅÏ¢ÔÚ mcp.json µÄ VMWARE_GUEST_USER / VMWARE_GUEST_PASSWORD ÖĞÒ»´ÎÅäÖÃ£¬»òÓÃ set_guest_credentials ¸üĞÂ¡£",
+_INSTRUCTIONS = (
+    "ç®¡ç†æœ¬æœº VMware Workstation è™šæ‹Ÿæœºï¼ˆå°è£… vmrun/vmcliï¼‰ã€‚"
+    "å·¥ä½œæµï¼šlist_vms å‘ç°è™šæ‹Ÿæœº â†’ select_vm é€‰ä¸­å½“å‰ VM â†’ "
+    "ä¸ç¡®å®šå‘½ä»¤å†™æ³•æ—¶ reference æŸ¥ç”¨æ³• â†’ execute æ‰§è¡Œä»»æ„ vmrun/vmcli å‘½ä»¤ã€‚"
+    "ç”µæºã€å¿«ç…§ã€å®¢æˆ·æœºå‘½ä»¤ã€æ–‡ä»¶ä¼ è¾“ã€å…±äº«æ–‡ä»¶å¤¹ã€å®¿ä¸»ç½‘ç»œã€ç¡¬ä»¶é…ç½®å…¨éƒ¨ç» execute å®Œæˆï¼›"
+    "args ä¸­çš„ {vm} ä¼šè¢«æ›¿æ¢ä¸ºå½“å‰é€‰ä¸­çš„ vmx è·¯å¾„ã€‚"
 )
+
+mcp = MCPServer("vmware_mcp", instructions=_INSTRUCTIONS)
 
 vmrun = Vmrun()
 vmcli = Vmcli()
 
-
-
-# ---- ²ÎÊıÃèÊö±ğÃû£¨schema ÖĞÕ¹Ê¾¸ø AI agent£¬°ïÖúÆäÀí½â²ÎÊıº¬Òå£© ----
-VmxPath = Annotated[str, Field(description="ĞéÄâ»ú vmx ÎÄ¼şµÄÍêÕûÂ·¾¶£¬¿ÉÓÃ list »ò list_registered_vms »ñÈ¡")]
-GuestUser = Annotated[str, Field(description="¿Í»§»ú OS µÇÂ¼ÓÃ»§Ãû")]
-GuestPassword = Annotated[str, Field(description="¿Í»§»ú OS µÇÂ¼ÃÜÂë£»¿ÕÃÜÂëÕË»§´«¿Õ×Ö·û´®")]
-GuestPath = Annotated[str, Field(description="¿Í»§»úÄÚµÄÍêÕûÂ·¾¶£¬Èç C:\\mcp_test\\a.txt")]
-HostPath = Annotated[str, Field(description="ËŞÖ÷»úÉÏµÄÍêÕûÂ·¾¶£¬Èç D:\\files\\a.txt")]
-SnapshotName = Annotated[str, Field(description="¿ìÕÕÃû³Æ£¬¿ÉÓÃ list_snapshots ²é¿´")]
-ShareName = Annotated[str, Field(description="¹²ÏíÎÄ¼ş¼ĞÃû³Æ")]
-DeviceLabel = Annotated[str, Field(description="Éè±¸±êÇ©£¬Èç ethernet0")]
-
-# ============ µçÔ´¹ÜÀí ============
+_current_vmx = ""
 
 
 @mcp.tool()
-def list() -> str:
-    """ÁĞ³öµ±Ç°ÕıÔÚÔËĞĞµÄ VMware ĞéÄâ»ú£¨vmx Â·¾¶ÓëÊıÁ¿£©"""
-    return vmrun.list()
+def list_vms() -> str:
+    """åˆ—å‡ºè™šæ‹Ÿæœºï¼šè¿è¡Œä¸­çš„ï¼ˆvmrun listï¼‰+ è™šæ‹Ÿæœºåº“ä¸­çš„å…¨éƒ¨ï¼ˆå«å…³æœº/æš‚åœï¼‰ï¼Œå¹¶æ ‡æ³¨å½“å‰é€‰ä¸­çš„ VMã€‚"""
+    sections = [f"===== è¿è¡Œä¸­ =====\n{vmrun.list()}", f"===== è™šæ‹Ÿæœºåº“ =====\n{read_inventory()}"]
+    if _current_vmx:
+        sections.append(f"å½“å‰é€‰ä¸­: {_current_vmx}")
+    else:
+        sections.append("å½“å‰é€‰ä¸­: ï¼ˆæ— ï¼Œç”¨ select_vm é€‰ä¸­å execute é‡Œå¯ç”¨ {vm} æŒ‡ä»£ï¼‰")
+    return "\n\n".join(sections)
+
 
 @mcp.tool()
-def list_registered_vms() -> str:
-    """ÁĞ³ö Workstation ĞéÄâ»ú¿âÖĞµÄÈ«²¿ĞéÄâ»ú£¨º¬¹Ø»ú/ÔİÍ££©£¬¶ÁÈ¡ %APPDATA%\\VMware\\inventory.vmls"""
-    return read_inventory()
+def select_vm(
+    vmx_path: Annotated[str, Field(description="è™šæ‹Ÿæœº vmx æ–‡ä»¶çš„å®Œæ•´è·¯å¾„ï¼›ä¼ ç©ºä¸²å–æ¶ˆé€‰ä¸­")],
+) -> str:
+    """é€‰ä¸­åç»­æ“ä½œçš„å½“å‰è™šæ‹Ÿæœºï¼Œexecute çš„ args é‡Œç”¨ {vm} æŒ‡ä»£ã€‚è¿”å›è¯¥ VM çš„ç”µæºçŠ¶æ€ã€‚"""
+    global _current_vmx
+    vmx_path = vmx_path.strip()
+    if not vmx_path:
+        _current_vmx = ""
+        return "å·²å–æ¶ˆé€‰ä¸­"
+    if not Path(vmx_path).is_file():
+        return f"é”™è¯¯: vmx æ–‡ä»¶ä¸å­˜åœ¨: {vmx_path}ï¼ˆç”¨ list_vms æŸ¥çœ‹å¯ç”¨è™šæ‹Ÿæœºï¼‰"
+    _current_vmx = vmx_path
+    state = vmcli.power_query(vmx_path)
+    return f"å·²é€‰ä¸­: {vmx_path}\nç”µæºçŠ¶æ€: {state}"
+
 
 @mcp.tool()
-def get_product_info() -> str:
-    """²é¿´±¾»ú VMware Workstation °æ±¾ÒÔ¼° vmrun/vmcli ÊÇ·ñ¿ÉÓÃ"""
-    return product_info()
+def execute(
+    tool: Annotated[Literal["vmrun", "vmcli"], Field(description="æ‰§è¡Œå™¨ï¼švmrunï¼ˆç”µæº/å¿«ç…§/å®¢æˆ·æœº/ç½‘ç»œ/å…±äº«æ–‡ä»¶å¤¹ï¼‰æˆ– vmcliï¼ˆå»ºæœº/ç¡¬ä»¶/ç£ç›˜/ç½‘å¡/MKS/HGFS/æ¨¡æ¿ï¼‰")],
+    args: Annotated[str, Field(description='å‘½ä»¤ä¸å‚æ•°ï¼ˆä¸å«å¯æ‰§è¡Œæ–‡ä»¶æœ¬èº«ï¼‰ï¼Œ{vm} æ›¿æ¢ä¸ºå½“å‰ vmxã€‚ç¤ºä¾‹ï¼švmrun "listSnapshots {vm} showTree"ï¼›vmrun "runProgramInGuest {vm} -noWait C:\\Windows\\System32\\cmd.exe /c ""whoami > C:\\t.txt"""ï¼›vmcli "{vm} Power query"ï¼ˆvmx æ”¾é¦–ä½ï¼‰ï¼›vmrun "listHostNetworks"ï¼ˆæ— éœ€ vm çš„å‘½ä»¤ä¸ç”¨å ä½ç¬¦ï¼‰')],
+    timeout: Annotated[float | None, Field(description="è¶…æ—¶ç§’æ•°ï¼›clone ç­‰æ…¢æ“ä½œå»ºè®® 600ã€‚é»˜è®¤ vmrun 60 / vmcli 120")] = None,
+) -> str:
+    """æ‰§è¡Œä»»æ„ vmrun/vmcli å‘½ä»¤ã€‚-T wsã€åŠ å¯† VM å¯†ç ã€å®¢æˆ·æœºç™»å½•ä¿¡æ¯ï¼ˆ-gu/-gpã€-u/-pï¼‰è‡ªåŠ¨æ³¨å…¥ã€‚ä¸ç¡®å®šå‘½ä»¤å†™æ³•å…ˆè°ƒ referenceã€‚"""
+    if "{vm}" in args:
+        if not _current_vmx:
+            return "é”™è¯¯: args å« {vm} ä½†å°šæœªé€‰ä¸­è™šæ‹Ÿæœºï¼Œå…ˆè°ƒç”¨ select_vm"
+        args = args.replace("{vm}", _current_vmx)
+    argv = shlex.split(args, posix=False)
+    if not argv:
+        return "é”™è¯¯: args ä¸ºç©º"
+    if tool == "vmrun":
+        return vmrun.run(*argv, timeout=timeout)
+    return vmcli.run(*argv, timeout=timeout)
+
+
+@mcp.tool()
+def reference(
+    query: Annotated[str, Field(description="å…³é”®è¯ï¼ˆä¸­è‹±æ–‡å‡å¯ï¼‰ï¼Œå¦‚ å¿«ç…§ / runProgramInGuest / Disk / å…±äº«æ–‡ä»¶å¤¹ï¼›ç•™ç©ºæŸ¥çœ‹å¯æ£€ç´¢ä¸»é¢˜")] = "",
+) -> str:
+    """æ£€ç´¢ vmrun/vmcli å‘½ä»¤ç”¨æ³•ä¸æ³¨æ„äº‹é¡¹ï¼ˆå†…ç½®ç¬”è®° + vmrun/vmcli å®æ—¶å¸®åŠ©ï¼‰ã€‚æ‰§è¡Œå‘½ä»¤å‰å…ˆæŸ¥è¿™é‡Œã€‚"""
+    return search_reference(query)
+
 
 @mcp.tool()
 def set_guest_credentials(
-    username: GuestUser,
-    password: GuestPassword = "",
+    username: Annotated[str, Field(description="å®¢æˆ·æœº OS ç™»å½•ç”¨æˆ·å")],
+    password: Annotated[str, Field(description="å®¢æˆ·æœº OS ç™»å½•å¯†ç ï¼›ç©ºå¯†ç è´¦æˆ·ä¼ ç©ºå­—ç¬¦ä¸²")] = "",
 ) -> str:
-    """ÉèÖÃºóĞø¿Í»§»ú²Ù×÷Ê¹ÓÃµÄµÇÂ¼ÓÃ»§ÃûÓëÃÜÂë¡£Ò²¿ÉÔÚ mcp.json µÄ env ÀïÒ»´ÎÅäºÃ VMWARE_GUEST_USER / VMWARE_GUEST_PASSWORD¡£"""
+    """è®¾ç½®åç»­å®¢æˆ·æœºæ“ä½œä½¿ç”¨çš„ç™»å½•ç”¨æˆ·åä¸å¯†ç ã€‚ä¹Ÿå¯åœ¨ mcp.json çš„ env é‡Œä¸€æ¬¡é…å¥½ VMWARE_GUEST_USER / VMWARE_GUEST_PASSWORDã€‚"""
     vmrun.set_guest_credentials(username, password)
     vmcli.set_guest_credentials(username, password)
     return "OK"
 
-@mcp.tool()
-def start(
-    vmx_path: VmxPath,
-    gui: Annotated[bool, Field(description="True ÏÔÊ¾ĞéÄâ»ú½çÃæ£¬False ºóÌ¨ÎŞ½çÃæÆô¶¯")] = False,
-) -> str:
-    """Æô¶¯ĞéÄâ»ú¡£gui=True ÏÔÊ¾½çÃæ£¬False ºóÌ¨ÎŞ½çÃæÆô¶¯"""
-    return vmrun.start(vmx_path, gui)
 
 @mcp.tool()
-def stop(
-    vmx_path: VmxPath,
-    hard: Annotated[bool, Field(description="False Èí¹Ø»ú£¨Ğè Tools£©£¬True Ç¿ÖÆ¶Ïµç")] = False,
-) -> str:
-    """¹Ø±ÕĞéÄâ»ú¡£hard=False Èí¹Ø»ú£¨Ğè Tools£©£¬True Ç¿ÖÆ¶Ïµç"""
-    return vmrun.stop(vmx_path, hard)
-
-@mcp.tool()
-def reset(
-    vmx_path: VmxPath,
-    hard: Annotated[bool, Field(description="True Ç¿ÖÆÖØÖÃ£¬False ÈíÖØÆô")] = False,
-) -> str:
-    """ÖØÆôĞéÄâ»ú¡£hard=True Ç¿ÖÆÖØÖÃ"""
-    return vmrun.reset(vmx_path, hard)
-
-@mcp.tool()
-def suspend(
-    vmx_path: VmxPath,
-    hard: Annotated[bool, Field(description="True Ç¿ÖÆ¹ÒÆğ£¬False Èí¹ÒÆğ")] = False,
-) -> str:
-    """¹ÒÆğĞéÄâ»ú£¨±£´æ×´Ì¬µ½´ÅÅÌ£©"""
-    return vmrun.suspend(vmx_path, hard)
-
-# ============ ¿ìÕÕ ============
-
-
-@mcp.tool()
-def list_snapshots(
-    vmx_path: VmxPath,
-    show_tree: Annotated[bool, Field(description="True ÒÔÊ÷ĞÎÏÔÊ¾¿ìÕÕ²ã¼¶")] = False,
-) -> str:
-    """ÁĞ³öĞéÄâ»úµÄËùÓĞ¿ìÕÕ£¬show_tree=True ÒÔÊ÷ĞÎÏÔÊ¾²ã¼¶"""
-    return vmrun.list_snapshots(vmx_path, show_tree)
-
-@mcp.tool()
-def create_snapshot(
-    vmx_path: VmxPath,
-    name: SnapshotName,
-    description: Annotated[str, Field(description="¿ìÕÕËµÃ÷£¬·Ç¿ÕÊ±¸Ä×ß vmcli Snapshot Take")] = "",
-    include_memory: Annotated[bool, Field(description="True ±£´æÔËĞĞÖĞÄÚ´æ×´Ì¬£¨¾­ vmcli£©")] = False,
-) -> str:
-    """ÎªĞéÄâ»ú´´½¨¿ìÕÕ¡£ĞèÒªËµÃ÷»ò±£´æÄÚ´æÊ±×ß vmcli£¬·ñÔò×ß vmrun"""
-    if description or include_memory:
-        return vmcli.snapshot_take(vmx_path, name, description, include_memory)
-    return vmrun.create_snapshot(vmx_path, name)
-
-@mcp.tool()
-def delete_snapshot(
-    vmx_path: VmxPath,
-    name: SnapshotName,
-    delete_children: Annotated[bool, Field(description="True Í¬Ê±É¾³ı¸Ã¿ìÕÕµÄËùÓĞ×Ó¿ìÕÕ")] = False,
-) -> str:
-    """É¾³ıÖ¸¶¨¿ìÕÕ£¬delete_children=True Í¬Ê±É¾³ıÆä×Ó¿ìÕÕ"""
-    return vmrun.delete_snapshot(vmx_path, name, delete_children)
-
-@mcp.tool()
-def revert_to_snapshot(vmx_path: VmxPath, name: SnapshotName) -> str:
-    """½«ĞéÄâ»ú»Ö¸´µ½Ö¸¶¨¿ìÕÕµÄ×´Ì¬£¨×¢Òâ£º»Ö¸´ºóĞéÄâ»ú´¦ÓÚ¹Ø»ú×´Ì¬£¬ĞèÒª start ÖØĞÂ¿ª»ú£©"""
-    return vmrun.revert_to_snapshot(vmx_path, name)
-
-# ============ ¿Í»§»ú OS ============
-
-
-@mcp.tool()
-def get_guest_ip(
-    vmx_path: VmxPath,
-    wait: Annotated[bool, Field(description="True ×èÈûµÈ´ıÖ±µ½»ñÈ¡µ½ IP")] = False,
-) -> str:
-    """»ñÈ¡¿Í»§»ú IP µØÖ·£¬wait=True ×èÈûµÈ´ıÖ±µ½»ñÈ¡³É¹¦"""
-    return vmrun.get_guest_ip(vmx_path, wait)
-
-@mcp.tool()
-def run_program_in_guest(
-    vmx_path: VmxPath,
-    program: Annotated[str, Field(description="¿Í»§»úÄÚ³ÌĞòÍêÕûÂ·¾¶£¬Èç C:\\Windows\\System32\\cmd.exe")],
-    program_args: Annotated[str, Field(description='³ÌĞò²ÎÊı£¬Õû´®´«µİ£»cmd ³¡¾°ĞèĞÎÈç /c "ÃüÁî > Êä³öÎÄ¼ş"')] = "",
-    no_wait: Annotated[bool, Field(description="True ²»µÈ´ı³ÌĞò½áÊøÁ¢¼´·µ»Ø")] = False,
-    interactive: Annotated[bool, Field(description="GUI ³ÌĞò±ØĞë True ²Å»áÏÔÊ¾ÔÚ¿Í»§»úÓÃ»§×ÀÃæ£»´¿ÃüÁîĞĞ¿É False")] = False,
-    active_window: Annotated[bool, Field(description="True Æô¶¯ºó¼¤»î´°¿Ú£¨vmrun -activeWindow£©")] = False,
-) -> str:
-    """ÔÚ¿Í»§»úÄÚÔËĞĞ³ÌĞò¡£GUI ³ÌĞòĞè interactive=True ²ÅÏÔÊ¾ÔÚÓÃ»§×ÀÃæ£¬ÇÒ program Ö±½Ó¸øÍêÕûÂ·¾¶£¨Èç C:\\Windows\\System32\\calc.exe£©£»²»ÒªÓÃ cmd /c start ¿ª GUI£¨ÒıºÅ»á±»´íÇĞ£©¡£²»·µ»Ø³ÌĞò stdout£¬ĞèÈÃ³ÌĞò°ÑÊä³öĞ´µ½¿Í»§»úÎÄ¼şÔÙ copy_file_from_guest ÀÌ»Ø"""
-    return vmrun.run_program_in_guest(
-        vmx_path,
-        program,
-        program_args,
-        no_wait,
-        interactive,
-        active_window,
-    )
-
-@mcp.tool()
-def run_script_in_guest(
-    vmx_path: VmxPath,
-    interpreter: Annotated[str, Field(description="½âÊÍÆ÷ÍêÕûÂ·¾¶£¬Èç cmd.exe / powershell.exe / /bin/bash")],
-    script_text: Annotated[str, Field(description="½Å±¾ÎÄ±¾")],
-    no_wait: Annotated[bool, Field(description="True ²»µÈ´ı½Å±¾½áÊøÁ¢¼´·µ»Ø")] = False,
-    interactive: Annotated[bool, Field(description="True ÒÔ½»»¥»á»°ÔËĞĞ£¬±ãÓÚ GUI ¿É¼û")] = False,
-    active_window: Annotated[bool, Field(description="True Æô¶¯ºó¼¤»î´°¿Ú")] = False,
-) -> str:
-    """ÔÚ¿Í»§»úÄÚÓÃÖ¸¶¨½âÊÍÆ÷Ö´ĞĞ½Å±¾ÎÄ±¾£¨Windows cmd ½¨Òé¸ÄÓÃ run_program_in_guest µÄ /c ĞÎÌ¬£©"""
-    return vmrun.run_script_in_guest(
-        vmx_path,
-        interpreter,
-        script_text,
-        no_wait,
-        interactive,
-        active_window,
-    )
-
-@mcp.tool()
-def list_processes_in_guest(vmx_path: VmxPath) -> str:
-    """ÁĞ³ö¿Í»§»úÄÚÕıÔÚÔËĞĞµÄ½ø³Ì"""
-    return vmrun.list_processes_in_guest(vmx_path)
-
-@mcp.tool()
-def kill_process_in_guest(
-    vmx_path: VmxPath,
-    pid: Annotated[int, Field(description="Òª½áÊøµÄ½ø³Ì PID£¬¿ÉÓÃ list_processes_in_guest ²é¿´")],
-) -> str:
-    """°´ PID ½áÊø¿Í»§»úÄÚµÄ½ø³Ì"""
-    return vmrun.kill_process_in_guest(vmx_path, pid)
-
-@mcp.tool()
-def file_exists_in_guest(
-    vmx_path: VmxPath, guest_path: GuestPath
-) -> str:
-    """¼ì²é¿Í»§»úÄÚÎÄ¼şÊÇ·ñ´æÔÚ"""
-    return vmrun.file_exists_in_guest(vmx_path, guest_path)
-
-@mcp.tool()
-def directory_exists_in_guest(
-    vmx_path: VmxPath, guest_path: GuestPath
-) -> str:
-    """¼ì²é¿Í»§»úÄÚÄ¿Â¼ÊÇ·ñ´æÔÚ"""
-    return vmrun.directory_exists_in_guest(vmx_path, guest_path)
-
-@mcp.tool()
-def list_directory_in_guest(
-    vmx_path: VmxPath, guest_path: GuestPath
-) -> str:
-    """ÁĞ³ö¿Í»§»úÄÚÄ¿Â¼ÄÚÈİ"""
-    return vmrun.list_directory_in_guest(vmx_path, guest_path)
-
-@mcp.tool()
-def create_directory_in_guest(
-    vmx_path: VmxPath, guest_path: GuestPath
-) -> str:
-    """ÔÚ¿Í»§»úÄÚ´´½¨Ä¿Â¼"""
-    return vmrun.create_directory_in_guest(vmx_path, guest_path)
-
-@mcp.tool()
-def delete_file_in_guest(
-    vmx_path: VmxPath, guest_path: GuestPath
-) -> str:
-    """É¾³ı¿Í»§»úÄÚÎÄ¼ş"""
-    return vmrun.delete_file_in_guest(vmx_path, guest_path)
-
-@mcp.tool()
-def delete_directory_in_guest(
-    vmx_path: VmxPath, guest_path: GuestPath
-) -> str:
-    """É¾³ı¿Í»§»úÄÚÄ¿Â¼"""
-    return vmrun.delete_directory_in_guest(vmx_path, guest_path)
-
-@mcp.tool()
-def copy_file_to_guest(
-    vmx_path: VmxPath,
-    host_path: HostPath,
-    guest_path: GuestPath,
-) -> str:
-    """°ÑËŞÖ÷»úÎÄ¼ş¸´ÖÆµ½¿Í»§»ú"""
-    return vmrun.copy_file_to_guest(vmx_path, host_path, guest_path)
-
-@mcp.tool()
-def copy_file_from_guest(
-    vmx_path: VmxPath,
-    guest_path: GuestPath,
-    host_path: HostPath,
-) -> str:
-    """°Ñ¿Í»§»úÎÄ¼ş¸´ÖÆµ½ËŞÖ÷»ú"""
-    return vmrun.copy_file_from_guest(vmx_path, guest_path, host_path)
-
-@mcp.tool()
-def rename_file_in_guest(
-    vmx_path: VmxPath,
-    original: Annotated[str, Field(description="¿Í»§»úÄÚÔ­ÎÄ¼şÍêÕûÂ·¾¶")],
-    new: Annotated[str, Field(description="ĞÂÎÄ¼şÍêÕûÂ·¾¶")],
-) -> str:
-    """ÖØÃüÃû¿Í»§»úÄÚÎÄ¼ş"""
-    return vmrun.rename_file_in_guest(vmx_path, original, new)
-
-@mcp.tool()
-def capture_screen(
-    vmx_path: VmxPath,
-    host_path: Annotated[str, Field(description="½ØÍ¼±£´æµ½ËŞÖ÷»úµÄÍêÕûÂ·¾¶£¬Èç D:\\shot.png")],
-) -> str:
-    """½ØÈ¡ĞéÄâ»úÆÁÄ»£¬±£´æÎªËŞÖ÷»úÉÏµÄÍ¼Æ¬ÎÄ¼ş"""
-    return vmrun.capture_screen(vmx_path, host_path)
-
-@mcp.tool()
-def type_keystrokes_in_guest(
-    vmx_path: VmxPath,
-    keystrokes: Annotated[str, Field(description="ÒªÊäÈëµÄ°´¼ü×Ö·û´®")],
-) -> str:
-    """Ïò¿Í»§»úÊäÈë°´¼ü£¨vmrun typeKeystrokesInGuest£©"""
-    return vmrun.type_keystrokes_in_guest(
-        vmx_path, keystrokes
-    )
-
-# ============ ËŞÖ÷ÍøÂç ============
-
-
-@mcp.tool()
-def list_host_networks() -> str:
-    """ÁĞ³öËŞÖ÷»úËùÓĞĞéÄâÍøÂç£¨Èç vmnet0/vmnet1/vmnet8£©"""
-    return vmrun.list_host_networks()
-
-@mcp.tool()
-def list_port_forwardings(
-    network: Annotated[str, Field(description="ËŞÖ÷ÍøÂçÃû£¬Èç vmnet8£¬¿ÉÓÃ list_host_networks ²é¿´")],
-) -> str:
-    """ÁĞ³öÖ¸¶¨ËŞÖ÷ÍøÂçÉÏµÄ¶Ë¿Ú×ª·¢¹æÔò"""
-    return vmrun.list_port_forwardings(network)
-
-@mcp.tool()
-def set_port_forwarding(
-    network: Annotated[str, Field(description="ËŞÖ÷ÍøÂçÃû£¬Èç vmnet8")],
-    protocol: Annotated[str, Field(description="Ğ­Òé£ºtcp | udp")],
-    host_port: Annotated[int, Field(description="ËŞÖ÷»ú¶Ë¿Ú")],
-    guest_ip: Annotated[str, Field(description="¿Í»§»ú IP£¬¿ÉÓÃ get_guest_ip »ñÈ¡")],
-    guest_port: Annotated[int, Field(description="¿Í»§»ú¶Ë¿Ú")],
-    description: Annotated[str, Field(description="¹æÔò±¸×¢")] = "",
-) -> str:
-    """ÔÚËŞÖ÷ÍøÂçÉÏÌí¼Ó/¸üĞÂ¶Ë¿Ú×ª·¢¡£protocol: tcp | udp"""
-    return vmrun.set_port_forwarding(network, protocol, host_port, guest_ip, guest_port, description)
-
-@mcp.tool()
-def delete_port_forwarding(
-    network: Annotated[str, Field(description="ËŞÖ÷ÍøÂçÃû£¬Èç vmnet8")],
-    protocol: Annotated[str, Field(description="Ğ­Òé£ºtcp | udp")],
-    host_port: Annotated[int, Field(description="ËŞÖ÷»ú¶Ë¿Ú")],
-) -> str:
-    """É¾³ıËŞÖ÷ÍøÂçÉÏµÄ¶Ë¿Ú×ª·¢¹æÔò"""
-    return vmrun.delete_port_forwarding(network, protocol, host_port)
-
-# ============ ¹²ÏíÎÄ¼ş¼Ğ ============
-
-
-@mcp.tool()
-def list_shared_folders(vmx_path: VmxPath) -> str:
-    """ÁĞ³öĞéÄâ»úµÄ¹²ÏíÎÄ¼ş¼Ğ¼°ÔËĞĞÊ±×´Ì¬£¨¾­ vmcli HGFS query£¬ĞèÒªĞéÄâ»ú´¦ÓÚÔËĞĞ×´Ì¬£©"""
-    return vmcli.hgfs_query(vmx_path)
-
-@mcp.tool()
-def add_shared_folder(vmx_path: VmxPath, share_name: ShareName, host_path: HostPath) -> str:
-    """Ìí¼ÓËŞÖ÷»ú-¿Í»§»ú¹²ÏíÎÄ¼ş¼Ğ£¨¿Í»§»úÖĞ¾­ \\\\vmware-host\\Shared Folders\\<Ãû³Æ> ·ÃÎÊ£©"""
-    return vmrun.add_shared_folder(vmx_path, share_name, host_path)
-
-@mcp.tool()
-def remove_shared_folder(vmx_path: VmxPath, share_name: ShareName) -> str:
-    """ÒÆ³ı¹²ÏíÎÄ¼ş¼Ğ"""
-    return vmrun.remove_shared_folder(vmx_path, share_name)
-
-# ============ Í¨ÓÃ ============
-
-
-@mcp.tool()
-def check_tools_state(vmx_path: VmxPath) -> str:
-    """¼ì²é¿Í»§»ú VMware Tools ×´Ì¬£¨running/notInstalled µÈ£©"""
-    return vmrun.check_tools_state(vmx_path)
-
-@mcp.tool()
-def clone_vm(
-    vmx_path: VmxPath,
-    dest_vmx_path: Annotated[str, Field(description="¿ËÂ¡Ä¿±ê vmx ÍêÕûÂ·¾¶")],
-    linked: Annotated[bool, Field(description="True Á´½Ó¿ËÂ¡£¨Ê¡¿Õ¼ä£¬ÒÀÀµÔ´ VM£©£¬False ÍêÕû¿ËÂ¡")] = False,
-    snapshot_name: Annotated[str, Field(description="»ùÓÚÄÄ¸ö¿ìÕÕ¿ËÂ¡£¬Áô¿Õ»ùÓÚµ±Ç°×´Ì¬")] = "",
-    clone_name: Annotated[str, Field(description="¿ËÂ¡ºóµÄÏÔÊ¾Ãû³Æ")] = "",
-) -> str:
-    """¿ËÂ¡ĞéÄâ»ú¡£linked=True Á´½Ó¿ËÂ¡£¨Ê¡¿Õ¼ä£¬ÒÀÀµÔ´£©£¬False ÍêÕû¿ËÂ¡"""
-    return vmrun.clone_vm(vmx_path, dest_vmx_path, linked, snapshot_name, clone_name)
-
-# ============ vmcli À©Õ¹£¨µçÔ´²éÑ¯ / ½¨»ú / Ó²¼şÅäÖÃ / ´ÅÅÌ / ¼üÊóÆÁÄ»£© ============
-
-
-@mcp.tool()
-def get_power_state(vmx_path: VmxPath) -> str:
-    """²éÑ¯ĞéÄâ»úµçÔ´×´Ì¬£¨on/off/suspended µÈ£»vmrun µÄ list Ö»ÄÜ¿´µ½ÔËĞĞÖĞµÄ VM£¬²é¹Ø»ú×´Ì¬ÓÃ±¾¹¤¾ß£©"""
-    return vmcli.power_query(vmx_path)
-
-@mcp.tool()
-def get_chipset(vmx_path: VmxPath) -> str:
-    """²éÑ¯ĞéÄâ»ú CPU/ÄÚ´æµÈĞ¾Æ¬×éÅäÖÃ"""
-    return vmcli.chipset_query(vmx_path)
-
-@mcp.tool()
-def set_vcpu_count(
-    vmx_path: VmxPath,
-    vcpus: Annotated[int, Field(description="vCPU ×ÜÊı")],
-) -> str:
-    """ÉèÖÃĞéÄâ»ú vCPU ÊıÁ¿"""
-    return vmcli.chipset_set_vcpu_count(vmx_path, vcpus)
-
-@mcp.tool()
-def set_memory_mb(
-    vmx_path: VmxPath,
-    size_mb: Annotated[int, Field(description="ÄÚ´æ´óĞ¡£¬µ¥Î» MB")],
-) -> str:
-    """ÉèÖÃĞéÄâ»úÄÚ´æ´óĞ¡£¨MB£©"""
-    return vmcli.chipset_set_mem_size(vmx_path, size_mb)
-
-@mcp.tool()
-def list_disks(vmx_path: VmxPath) -> str:
-    """²éÑ¯ĞéÄâ»ú´ÅÅÌÁĞ±íÓë×´Ì¬£¨Éè±¸±êÇ©Èç scsi0:0¡¢ÈİÁ¿µÈ£©"""
-    return vmcli.disk_query(vmx_path)
-
-@mcp.tool()
-def list_ethernet(vmx_path: VmxPath) -> str:
-    """²éÑ¯ĞéÄâ»úÍø¿¨ÅäÖÃ£¨Éè±¸±êÇ©¡¢Á¬½ÓÀàĞÍµÈ£©"""
-    return vmcli.ethernet_query(vmx_path)
-
-@mcp.tool()
-def set_ethernet_connection_type(
-    vmx_path: VmxPath,
-    device_label: DeviceLabel,
-    connection_type: Annotated[str, Field(description="Á¬½ÓÀàĞÍ£¬Èç nat | bridged | hostonly")],
-) -> str:
-    """ÉèÖÃÍø¿¨Á¬½ÓÀàĞÍ£¨Èç nat / bridged / hostonly£©"""
-    return vmcli.ethernet_set_connection_type(vmx_path, device_label, connection_type)
-
-@mcp.tool()
-def ethernet_connection_control(
-    vmx_path: VmxPath,
-    connect_op: Annotated[str, Field(description="connect »ò disconnect")],
-    device_label: Annotated[str, Field(description="Íø¿¨±êÇ©£¬Èç ethernet0£»²¿·Ö°æ±¾¿ÉÁô¿Õ")] = "",
-) -> str:
-    """ÔËĞĞÊ±Á¬½Ó»ò¶Ï¿ªĞéÄâÍø¿¨"""
-    return vmcli.ethernet_connection_control(vmx_path, connect_op, device_label)
-
-@mcp.tool()
-def set_ethernet_start_connected(
-    vmx_path: VmxPath,
-    device_label: DeviceLabel,
-    start_connected: Annotated[bool, Field(description="True ¿ª»úÁ¬½Ó¸ÃÍø¿¨")],
-) -> str:
-    """ÉèÖÃÏÂ´Î¿ª»úÊÇ·ñÁ¬½Ó¸ÃÍø¿¨"""
-    return vmcli.ethernet_set_start_connected(vmx_path, device_label, start_connected)
-
-# ============ Î´µ¥¶À·â×°µÄÃüÁîÌÓÉú¿Ú ============
-
-
-@mcp.tool()
-def vmrun_command(
-    extra_args: Annotated[str, Field(description="vmrun ÃüÁîÓë²ÎÊı£¬²»º¬¿ÉÖ´ĞĞÎÄ¼ş±¾Éí£¬Èç 'listSnapshots D:\\\\vm\\\\a.vmx showTree'")],
-) -> str:
-    """Ö±½Óµ÷ÓÃ vmrun£¨ÒÑ×Ô¶¯¼Ó -T ws£©¡£ÓÃÓÚÉĞÎ´µ¥¶À·â×°µÄÃüÁî"""
-    return vmrun.command(extra_args)
-
-@mcp.tool()
-def vmcli_command(
-    module: Annotated[str, Field(description="Ä£¿éÃû£¬Èç Disk / Nvme / Guest / MKS")],
-    command: Annotated[str, Field(description="Ä£¿éÄÚÃüÁî£¬Èç query / SetPresent")],
-    vmx_path: Annotated[str, Field(description="ĞèÒª²Ù×÷ĞéÄâ»úÊ±Ìî vmx Â·¾¶£¬·ñÔòÁô¿Õ")] = "",
-    extra_args: Annotated[str, Field(description="ÆäÓà²ÎÊı£¬°´ vmcli °ïÖúÔ­ÑùÌîĞ´")] = "",
-) -> str:
-    """Ö±½Óµ÷ÓÃ vmcli Ä£¿éÃüÁî¡£ÓÃÓÚÉĞÎ´µ¥¶À·â×°µÄ¸ß¼¶Ñ¡Ïî£¨ÀıÈç Disk SetBandwidthCap£©"""
-    return vmcli.command(
-        module,
-        command,
-        extra_args,
-        vmx=vmx_path,
-    )
-
-# ============ Resources ============
-
-
-@mcp.resource(
-    "vmware://vms/running",
-    name="running_vms",
-    title="ÕıÔÚÔËĞĞµÄĞéÄâ»ú",
-    description="µ±Ç°ÕıÔÚÔËĞĞµÄ VMware ĞéÄâ»úÁĞ±í£¨vmx Â·¾¶ÓëÊıÁ¿£©",
-    mime_type="text/plain",
-)
-def running_vms() -> str:
-    return vmrun.list()
-
-
-@mcp.resource(
-    "vmware://vms/registered",
-    name="registered_vms",
-    title="ĞéÄâ»ú¿âÖĞµÄÈ«²¿ĞéÄâ»ú",
-    description="Workstation ĞéÄâ»ú¿âÇåµ¥£¨º¬¹Ø»ú/ÔİÍ££©£¬À´×Ô inventory.vmls",
-    mime_type="text/plain",
-)
-def registered_vms() -> str:
-    return read_inventory()
-
-
-@mcp.resource(
-    "vmware://host/networks",
-    name="host_networks",
-    title="ËŞÖ÷»úĞéÄâÍøÂç",
-    description="ËŞÖ÷»úÉÏËùÓĞ VMware ĞéÄâÍøÂçÁĞ±í",
-    mime_type="text/plain",
-)
-def host_networks() -> str:
-    return vmrun.list_host_networks()
-
-
-@mcp.resource(
-    "vmware://host/product",
-    name="product_info",
-    title="±¾»ú VMware ²úÆ·ĞÅÏ¢",
-    description="Workstation °²×°Â·¾¶Óë vmrun/vmcli °æ±¾",
-    mime_type="text/plain",
-)
-def product_info_resource() -> str:
+def get_product_info() -> str:
+    """æŸ¥çœ‹æœ¬æœº VMware Workstation ç‰ˆæœ¬ä»¥åŠ vmrun/vmcli æ˜¯å¦å¯ç”¨"""
     return product_info()
 
 

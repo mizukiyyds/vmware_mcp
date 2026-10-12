@@ -1,6 +1,4 @@
-# coding: gbk
-
-"""¼ì²é MCP ¹¤¾ßµÄ inputSchema£ºÈ·ÈÏ²ÎÊýÊÇ·ñÓÐÃèÊöÐÅÏ¢¡£"""
+"""æ£€æŸ¥ MCP å·¥å…·çš„ inputSchemaï¼šç¡®è®¤å‚æ•°æ˜¯å¦æœ‰æè¿°ä¿¡æ¯ã€‚"""
 
 import asyncio
 import json
@@ -13,7 +11,7 @@ from mcp.client.stdio import stdio_client
 
 async def main() -> None:
     env = dict(os.environ)
-    env["VMWARE_HOME"] = r"C:\Program Files\VMware\VMware Workstation"
+    env.setdefault("VMWARE_HOME", r"D:\software\VMware")
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
 
     params = StdioServerParameters(
@@ -25,7 +23,7 @@ async def main() -> None:
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
-            for name in ("start", "set_port_forwarding", "run_program_in_guest", "list_disks"):
+            for name in ("select_vm", "execute", "reference"):
                 t = next(t for t in tools.tools if t.name == name)
                 print(f"===== {name} =====")
                 print(f"description: {t.description}")
